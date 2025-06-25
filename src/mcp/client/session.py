@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import Any, AsyncGenerator, Awaitable, Protocol
+from typing import Any, AsyncGenerator, Protocol
 
 import anyio.lowlevel
 import httpx
@@ -280,13 +280,13 @@ class ClientSession(
             types.EmptyResult,
         )
 
-    def call_tool(
+    async def call_tool(
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
         read_timeout_seconds: timedelta | None = None,
         progress_callback: ProgressFnT | None = None,
-    ) -> Awaitable[types.CallToolResult]:
+    ) -> types.CallToolResult:
         """Send a tools/call request with optional progress callback.
 
         Args:
@@ -298,7 +298,7 @@ class ClientSession(
         Returns:
             A coroutine that completes with a single CallToolResult
         """
-        return self._call_tool_single(
+        return await self._call_tool_single(
             name=name,
             arguments=arguments,
             read_timeout_seconds=read_timeout_seconds,

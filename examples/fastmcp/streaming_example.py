@@ -34,7 +34,7 @@ def create_streaming_server() -> FastMCP:
             await asyncio.sleep(delay)
 
         # Return the final result (hasMore=False or no hasMore in _meta)
-        # return f"Completed processing {count} items"
+        return f"Completed processing {count} items"
 
     @mcp.tool(description="A regular non-streaming tool")
     async def normal_tool(message: str) -> str:
