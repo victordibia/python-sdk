@@ -34,7 +34,7 @@ def create_streaming_server() -> FastMCP:
             await asyncio.sleep(delay)
 
         # Return the final result (hasMore=False or no hasMore in _meta)
-        return f"Completed processing {count} items"
+        # return f"Completed processing {count} items"
 
     @mcp.tool(description="A regular non-streaming tool")
     async def normal_tool(message: str) -> str:
@@ -65,7 +65,8 @@ async def demo_streaming():
         async for partial_result in tool_call_stream:
             count += 1
             print(f"Received result {count}:")
-            print(f"  Content: {partial_result.content[0].text}")
+            if partial_result and partial_result.content:
+                print(f"  Content: {partial_result.content[0].text}")
             # print(f"  hasMore: {partial_result.has_more}")
 
         print(f"Received a total of {count} results")
@@ -74,7 +75,7 @@ async def demo_streaming():
         print("\nREGULAR EXAMPLE (No streaming):")
         print("------------------------------")
         result = await session.call_tool("streaming_counter", {"count": 5, "delay": 1})
-        print(f"Result: {result.content[0].text}")
+        print(f"Result: {result.content[0].text if result.content else 'No content'}")
 
 
 if __name__ == "__main__":
