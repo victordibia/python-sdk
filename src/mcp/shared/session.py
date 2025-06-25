@@ -402,16 +402,32 @@ class BaseSession(
                         except Exception as e:
                             # For other validation errors, log and continue
                             logging.warning(
-                                f"Failed to validate notification: {e}. " f"Message was: {message.message.root}"
+                                f"Failed to validate notification: {e}. Message was: {message.message.root}"
                             )
                     else:  # Response or error
-                        stream = self._response_streams.pop(message.message.root.id, None)
+                        # Check if the response is a partial result
+                        is_partial = False
+                        if isinstance(message.message.root, JSONRPCResponse):
+                            result_data = message.message.root.result
+                            # Check for hasMore in _meta field according to spec
+                            if "_meta" in result_data and "hasMore" in result_data["_meta"]:
+                                is_partial = bool(result_data["_meta"]["hasMore"])
+
+                        # Get the response stream for this request ID
+                        stream = self._response_streams.get(message.message.root.id)
                         if stream:
+                            # For both partial and final results, send to the response stream
                             await stream.send(message.message.root)
+
+                            # Only remove the stream for final results
+                            if not is_partial:
+                                self._response_streams.pop(message.message.root.id, None)
+                                # Close the stream to prevent resource warnings
+                                await stream.aclose()
                         else:
-                            await self._handle_incoming(
-                                RuntimeError("Received response with an unknown " f"request ID: {message}")
-                            )
+                            errmsg = f"Received {'partial' if is_partial else 'final'} response with an unknown request ID: {message.message.root.id}"
+                            logging.warning(errmsg)
+                            await self._handle_incoming(RuntimeError(errmsg))
 
             except anyio.ClosedResourceError:
                 # This is expected when the client disconnects abruptly.

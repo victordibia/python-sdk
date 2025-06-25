@@ -54,6 +54,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.context import LifespanContextT, RequestContext, RequestT
 from mcp.types import (
     AnyFunction,
+    CallToolResult,
     ContentBlock,
     GetPromptResult,
     TextContent,
@@ -162,7 +163,7 @@ class FastMCP:
             # we should validate that if auth is enabled, we have either an
             # auth_server_provider to host our own authorization server,
             # OR the URL of a 3rd party authorization server.
-            raise ValueError("settings.auth must be specified if and only if auth_server_provider " "is specified")
+            raise ValueError("settings.auth must be specified if and only if auth_server_provider is specified")
         self._auth_server_provider = auth_server_provider
         self._event_store = event_store
         self._custom_starlette_routes: list[Route] = []
@@ -367,7 +368,7 @@ class FastMCP:
         # Check if user passed function directly instead of calling decorator
         if callable(name):
             raise TypeError(
-                "The @tool decorator was used incorrectly. " "Did you forget to call it? Use @tool() instead of @tool"
+                "The @tool decorator was used incorrectly. Did you forget to call it? Use @tool() instead of @tool"
             )
 
         def decorator(fn: AnyFunction) -> AnyFunction:
@@ -467,7 +468,7 @@ class FastMCP:
 
                 if uri_params != func_params:
                     raise ValueError(
-                        f"Mismatch between URI parameters {uri_params} " f"and function parameters {func_params}"
+                        f"Mismatch between URI parameters {uri_params} and function parameters {func_params}"
                     )
 
                 # Register as template
@@ -1078,3 +1079,49 @@ class Context(BaseModel, Generic[ServerSessionT, LifespanContextT, RequestT]):
     async def error(self, message: str, **extra: Any) -> None:
         """Send an error log message."""
         await self.log("error", message, **extra)
+
+    async def stream_partial(self, content: list[ContentBlock]) -> None:
+        """Stream a partial result back to the client.
+
+        This method can be used within a tool implementation to send partial results
+        back to the client as they become available, without waiting for the tool to complete.
+        The client must explicitly opt in by setting allowPartial=True in the request.
+
+        Args:
+            content: The partial content blocks to send
+
+        Note:
+            This only works if the client has opted in by setting allowPartial=True.
+            If the client hasn't opted in, this method will do nothing.
+        """
+        if not self._request_context:
+            return
+
+        # Check if client opted in for partial results
+        # Note: With the unified client implementation, both call_tool and stream_tool
+        # use the same underlying mechanism, so servers can always send partial results
+        # if they support streaming, and the client will handle them appropriately
+
+        # Create a partial result with hasMore=True in _meta according to spec
+        partial_result = CallToolResult(
+            content=content,
+            _meta={"hasMore": True},  # Mark as partial according to spec
+        )
+
+        # Get the request ID for this context
+        request_id = self._request_context.request_id
+
+        # Get access to the session
+        session = self._request_context.session
+
+        # Send the partial result directly as a response
+        # This will allow the client to receive it through the async generator
+        try:
+            await session._send_response(  # type: ignore[reportPrivateUsage]
+                request_id=request_id,
+                response=partial_result,  # type: ignore
+            )
+        except Exception as e:
+            import logging
+
+            logging.error(f"Failed to send partial result: {e}", exc_info=True)

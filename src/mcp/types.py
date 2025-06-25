@@ -50,6 +50,13 @@ class RequestParams(BaseModel):
         notifications. The receiver is not obligated to provide these notifications.
         """
 
+        allowPartial: bool = False
+        """
+        If specified and True, the caller is requesting partial results.
+        Partial results allow the server to send multiple responses for a single
+        request, with all but the last having isPartial=True.
+        """
+
         model_config = ConfigDict(extra="allow")
 
     meta: Meta | None = Field(alias="_meta", default=None)
