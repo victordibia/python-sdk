@@ -12,6 +12,7 @@ import anyio
 from anyio import to_thread
 from anyio.abc import Process
 from anyio.streams.file import FileReadStream, FileWriteStream
+from typing_extensions import deprecated
 
 
 def get_windows_executable_command(command: str) -> str:
@@ -115,13 +116,14 @@ async def create_windows_process(
     env: dict[str, str] | None = None,
     errlog: TextIO | None = sys.stderr,
     cwd: Path | str | None = None,
-) -> FallbackProcess:
+) -> Process | FallbackProcess:
     """
     Creates a subprocess in a Windows-compatible way.
 
-    On Windows, asyncio.create_subprocess_exec has incomplete support
-    (NotImplementedError when trying to open subprocesses).
-    Therefore, we fallback to subprocess.Popen and wrap it for async usage.
+    Attempt to use anyio's open_process for async subprocess creation.
+    In some cases this will throw NotImplementedError on Windows, e.g.
+    when using the SelectorEventLoop which does not support async subprocesses.
+    In that case, we fall back to using subprocess.Popen.
 
     Args:
         command (str): The executable to run
@@ -132,6 +134,45 @@ async def create_windows_process(
 
     Returns:
         FallbackProcess: Async-compatible subprocess with stdin and stdout streams
+    """
+    try:
+        # First try using anyio with Windows-specific flags to hide console window
+        process = await anyio.open_process(
+            [command, *args],
+            env=env,
+            # Ensure we don't create console windows for each process
+            creationflags=subprocess.CREATE_NO_WINDOW  # type: ignore
+            if hasattr(subprocess, "CREATE_NO_WINDOW")
+            else 0,
+            stderr=errlog,
+            cwd=cwd,
+        )
+        return process
+    except NotImplementedError:
+        # Windows often doesn't support async subprocess creation, use fallback
+        return await _create_windows_fallback_process(command, args, env, errlog, cwd)
+    except Exception:
+        # Try again without creation flags
+        process = await anyio.open_process(
+            [command, *args],
+            env=env,
+            stderr=errlog,
+            cwd=cwd,
+        )
+        return process
+
+
+async def _create_windows_fallback_process(
+    command: str,
+    args: list[str],
+    env: dict[str, str] | None = None,
+    errlog: TextIO | None = sys.stderr,
+    cwd: Path | str | None = None,
+) -> FallbackProcess:
+    """
+    Create a subprocess using subprocess.Popen as a fallback when anyio fails.
+
+    This function wraps the sync subprocess.Popen in an async-compatible interface.
     """
     try:
         # Try launching with creationflags to avoid opening a new console window
@@ -161,6 +202,10 @@ async def create_windows_process(
         return FallbackProcess(popen_obj)
 
 
+@deprecated(
+    "terminate_windows_process is deprecated and will be removed in a future version. "
+    "Process termination is now handled internally by the stdio_client context manager."
+)
 async def terminate_windows_process(process: Process | FallbackProcess):
     """
     Terminate a Windows process.

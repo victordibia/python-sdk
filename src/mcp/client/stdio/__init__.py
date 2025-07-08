@@ -16,7 +16,6 @@ from mcp.shared.message import SessionMessage
 from .win32 import (
     create_windows_process,
     get_windows_executable_command,
-    terminate_windows_process,
 )
 
 # Environment variables to inherit by default
@@ -37,6 +36,9 @@ DEFAULT_INHERITED_ENV_VARS = (
     if sys.platform == "win32"
     else ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"]
 )
+
+# Timeout for process termination before falling back to force kill
+PROCESS_TERMINATION_TIMEOUT = 2.0
 
 
 def get_default_environment() -> dict[str, str]:
@@ -180,10 +182,12 @@ async def stdio_client(server: StdioServerParameters, errlog: TextIO = sys.stder
         finally:
             # Clean up process to prevent any dangling orphaned processes
             try:
-                if sys.platform == "win32":
-                    await terminate_windows_process(process)
-                else:
-                    process.terminate()
+                process.terminate()
+                with anyio.fail_after(PROCESS_TERMINATION_TIMEOUT):
+                    await process.wait()
+            except TimeoutError:
+                # If process doesn't terminate in time, force kill it
+                process.kill()
             except ProcessLookupError:
                 # Process already exited, which is fine
                 pass
